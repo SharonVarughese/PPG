@@ -43,6 +43,7 @@ int THRESHOLD = 1900;
 int adp_threshold = 0;
 float alpha = 0.1;
 float emaValue = 1900;
+float heart_rate;
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -103,7 +104,7 @@ if ((micros() - last_tick_time) > TICK_20MSEC) {
       last_transition = new_transition;
 
     // Calculate heart rate in BPM
-      //heart_rate = 60000.0 / (float)pulse_period;
+      heart_rate = 60000.0 / (float)pulse_period;
       }
 
   old_state = current_state;
@@ -135,6 +136,7 @@ if ((micros() - last_tick_time) > TICK_20MSEC) {
      tick_1_sec = 0;
        sprintf(raw_pulse_data + 249, "\n");
       SerialBT.printf(raw_pulse_data);
+      SerialBT.printf("%f",heart_rate);
   }
   
 
