@@ -8,6 +8,7 @@
 #define Button_pressed_threshold 10
 #define Button_held_threshold 50
 #define TICK_20MSEC 20000
+#define TICK_1SEC 50
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -28,14 +29,15 @@ bool switch_state = false;
 uint16_t sensor_reading;
 bool old_state = false;
 bool current_state = false;
-unsigned long last_transition = 0;
+unsigned long last_transition;
 unsigned long new_transition;
 unsigned long pulse_period;
 
 unsigned long last_tick_time;
+uint16_t tick_1_sec = 0;  
 char raw_pulse_data[251];
 int buffer_indicator_2 = 1;
-static int buffer_indicator = 1;
+static int buffer_indicator = 0;
 
 int THRESHOLD = 1900;
 int adp_threshold = 0;
@@ -80,33 +82,13 @@ char j = '0';
 char mask;
 
 void loop() {
-    
-    //Switch reading module
-    if (digitalRead(SWITCH_PIN) != switch_state) { 
-    switchCount++;
-    // When the button is pressed
-    if (switchCount >= Button_pressed_threshold && switchCount < Button_held_threshold) { 
-      switchCount = 0;
-      switch_state = !switch_state; 
 
-    }
-    // When the button is pressed and held
-      else if (switchCount >= Button_held_threshold) {
-        
-      }
-      else {
-    if (switchCount > 1) {
-      switchCount--;
-    }
-      }
-    }
-
-  // pulse reading every 20ms
-  for (int i = 0; i < 50; i++){
-    if ((micros() - last_tick_time) > TICK_20MSEC) {
+if ((micros() - last_tick_time) > TICK_20MSEC) {
     last_tick_time = micros(); 
     sensor_reading = analogRead(SENSOR_PIN);
-    sprintf(raw_pulse_data + i*5, "%d,", sensor_reading);
+    sprintf(raw_pulse_data + buffer_indicator*5, "%4d,", sensor_reading);
+    buffer_indicator++;
+
 
 
   emaValue = (alpha * sensor_reading) + ((1 - alpha) * emaValue);
@@ -125,10 +107,37 @@ void loop() {
       }
 
   old_state = current_state;
+  tick_1_sec++;
+      //Switch reading module
+    if (digitalRead(SWITCH_PIN) != switch_state) { 
+    switchCount++;
+    // When the button is pressed
+    if (switchCount >= Button_pressed_threshold && switchCount < Button_held_threshold) { 
+      switchCount = 0;
+      switch_state = !switch_state; 
+
+    }
+    // When the button is pressed and held
+      else if (switchCount >= Button_held_threshold) {
+        
+      }
+      else {
+    if (switchCount > 1) {
+      switchCount--;
+    }
+      }
+    }
   }
+  if (tick_1_sec >= TICK_1SEC) {
+        if (buffer_indicator >= 50){
+      buffer_indicator = 0;
+    }
+     tick_1_sec = 0;
+       sprintf(raw_pulse_data + 249, "\n");
+      SerialBT.printf(raw_pulse_data);
   }
-  sprintf(raw_pulse_data + 250 - 1, "\n");
-  Serial.printf(raw_pulse_data);
+  
+
 
 }
 
