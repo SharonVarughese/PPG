@@ -33,9 +33,9 @@ unsigned long new_transition;
 unsigned long pulse_period;
 
 unsigned long last_tick_time;
-char raw_pulse_data[250];
-char empty_buffer[250];
-static int buffer_indicator = 0;
+char raw_pulse_data[251];
+int buffer_indicator_2 = 1;
+static int buffer_indicator = 1;
 
 int THRESHOLD = 1900;
 int adp_threshold = 0;
@@ -102,17 +102,12 @@ void loop() {
     }
 
   // pulse reading every 20ms
-  for (buffer_indicator, bufferindicator++, buffer_indicator > 50){
+  for (int i = 0; i < 50; i++){
     if ((micros() - last_tick_time) > TICK_20MSEC) {
     last_tick_time = micros(); 
-
     sensor_reading = analogRead(SENSOR_PIN);
-    raw_pulse_data[]
-    // reset the indicator when it is over limitation
-    if (buffer_indicator > 50) {
-      buffer_indicator = 1;
+    sprintf(raw_pulse_data + i*5, "%d,", sensor_reading);
 
-    }
 
   emaValue = (alpha * sensor_reading) + ((1 - alpha) * emaValue);
   adp_threshold = emaValue + 20;
@@ -132,7 +127,8 @@ void loop() {
   old_state = current_state;
   }
   }
-
+  sprintf(raw_pulse_data + 250 - 1, "\n");
+  Serial.printf(raw_pulse_data);
 
 }
 
