@@ -1,14 +1,16 @@
 
 #include "BluetoothSerial.h"
+#include "switch.h"
 
 #define LED1_PIN 32
 #define LED2_PIN 35
 #define SWITCH_PIN 33
 #define SENSOR_PIN 25
-#define Button_pressed_threshold 10
-#define Button_held_threshold 50
+
 #define TICK_20MSEC 20000
 #define TICK_1SEC 50
+#define DEBOUNCE_CNT 5
+Switch switch_1(1, DEBOUNCE_CNT);
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -90,59 +92,36 @@ if ((micros() - last_tick_time) > TICK_20MSEC) {
     //Serial.printf("%d,%d\n",sensor_reading,adp_threshold);
     sprintf(raw_pulse_data + buffer_indicator*5, "%4d,", sensor_reading);
     buffer_indicator++;
-
-
-
-  emaValue = (alpha * sensor_reading) + ((1 - alpha) * emaValue);
-  adp_threshold = emaValue + 45;
-  
-    
+    emaValue = (alpha * sensor_reading) + ((1 - alpha) * emaValue);
+    adp_threshold = emaValue + 45;
     current_state = (sensor_reading > adp_threshold);
-
+    digitalWrite(LED1_PIN , current_state ? HIGH:LOW);
     if (current_state != old_state && current_state == true) {
       new_transition = millis();
       pulse_period = new_transition - last_transition;
       last_transition = new_transition;
-
     // Calculate heart rate in BPM
       heart_rate = 60000.0 / (float)pulse_period;
       }
 
-  old_state = current_state;
-  tick_1_sec++;
+    old_state = current_state;
+    tick_1_sec++;
       //Switch reading module
-    if (digitalRead(SWITCH_PIN) != switch_state) { 
-    switchCount++;
-    // When the button is pressed
-    if (switchCount >= Button_pressed_threshold && switchCount < Button_held_threshold) { 
-      switchCount = 0;
-      switch_state = !switch_state; 
 
-    }
-    // When the button is pressed and held
-      else if (switchCount >= Button_held_threshold) {
-        
-      }
-      else {
-    if (switchCount > 1) {
-      switchCount--;
-    }
-      }
-    }
-  }
-  if (tick_1_sec >= TICK_1SEC) {
-        if (buffer_indicator >= 50){
-      buffer_indicator = 0;
-    }
-     tick_1_sec = 0;
-       sprintf(raw_pulse_data + 249, "\n");
-      Serial.printf(raw_pulse_data);
-      Serial.printf("%f\n",heart_rate);
-      Serial.printf("%d\n", adp_threshold);
   }
   
-
-
+  
+  
+  if (tick_1_sec >= TICK_1SEC) {
+    if (buffer_indicator >= 50){
+      buffer_indicator = 0;
+    }
+    tick_1_sec = 0;
+    sprintf(raw_pulse_data + 249, "\n");
+    Serial.printf(raw_pulse_data);
+    Serial.printf("%f\n", heart_rate);
+    Serial.printf("%d\n", adp_threshold);
+  }
 }
 
 int openEvt = 0;
