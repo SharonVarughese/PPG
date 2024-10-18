@@ -41,7 +41,7 @@ static int buffer_indicator = 0;
 
 int THRESHOLD = 1900;
 int adp_threshold = 0;
-float alpha = 0.1;
+float alpha = 0.01;
 float emaValue = 1900;
 float heart_rate;
 
@@ -87,13 +87,14 @@ void loop() {
 if ((micros() - last_tick_time) > TICK_20MSEC) {
     last_tick_time = micros(); 
     sensor_reading = analogRead(SENSOR_PIN);
+    //Serial.printf("%d,%d\n",sensor_reading,adp_threshold);
     sprintf(raw_pulse_data + buffer_indicator*5, "%4d,", sensor_reading);
     buffer_indicator++;
 
 
 
   emaValue = (alpha * sensor_reading) + ((1 - alpha) * emaValue);
-  adp_threshold = emaValue + 20;
+  adp_threshold = emaValue + 45;
   
     
     current_state = (sensor_reading > adp_threshold);
@@ -135,8 +136,9 @@ if ((micros() - last_tick_time) > TICK_20MSEC) {
     }
      tick_1_sec = 0;
        sprintf(raw_pulse_data + 249, "\n");
-      SerialBT.printf(raw_pulse_data);
-      SerialBT.printf("%f",heart_rate);
+      Serial.printf(raw_pulse_data);
+      Serial.printf("%f\n",heart_rate);
+      Serial.printf("%d\n", adp_threshold);
   }
   
 
