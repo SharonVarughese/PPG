@@ -15,39 +15,71 @@ def draw_figure(canvas, figure):
     figure_canvas_agg.get_tk_widget().pack(side='top', fill='both', expand=1)
     return figure_canvas_agg
 
-# Create the initial Matplotlib figure
-def create_plot():
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))  # Increased figure size to be WAY larger
-    ax1.set_xlabel("Time")
+# Create the initial Matplotlib figures
+def create_plots():
+    fig1, ax1 = plt.subplots(figsize=(15, 12))  # EMG signal plot
+    ax1.set_xlabel("Sample Points")
     ax1.set_ylabel("Pulse Data")
-    ax2.set_xlabel("Time")
+
+    fig2, ax2 = plt.subplots(figsize=(15, 12))  # Heart rate plot
+    ax2.set_xlabel("Time (s)")
     ax2.set_ylabel("Heart Rate (BPM)")
-    return fig, ax1, ax2
+
+    fig3, ax3 = plt.subplots(figsize=(15, 12))  # Info plot (placeholder for now)
+    ax3.set_xlabel("Info")
+    ax3.set_ylabel("Details")
+
+    return (fig1, ax1), (fig2, ax2), (fig3, ax3)
+
+# Function to draw the alarm LEDs
+def draw_alarm(canvas, state):
+    canvas.delete("all")
+    colors = {"high": "red", "normal": "green", "low": "blue"}
+    positions = {"high": (50, 50), "normal": (150, 50), "low": (250, 50)}
+    for key, pos in positions.items():
+        color = colors[key] if state == key else "grey"
+        canvas.create_oval(pos[0] - 20, pos[1] - 20, pos[0] + 20, pos[1] + 20, fill=color)
+        canvas.create_text(pos[0], pos[1] + 30, text=key.capitalize(), font=("Helvetica", 12))
+    canvas.create_text(150, 10, text="ALARMS", font=("Helvetica", 16))
 
 # Layout for the GUI
 layout = [
-    [sg.Text("Pulse Rate: "), sg.Text("0", key='-BPM-', font=("Helvetica", 50), size=(10, 1))],  # Even larger text
-    [sg.Canvas(key='-CANVAS-', size=(1200, 800))],  # Significantly larger canvas
-    [sg.Multiline(size=(100, 10), key='-LOG-', disabled=True, font=("Helvetica", 16))],  # Larger log
+    [sg.Text("Pulse Rate: "), sg.Text("0", key='-BPM-', font=("Helvetica", 50), size=(10, 1))],
+    [sg.Canvas(key='-CANVAS-', size=(1200, 800)),
+     sg.Column([
+         [sg.Canvas(key='-ALARM-', size=(300, 100))],
+         [sg.Text("High Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=100, key='-HIGH-THRESH-'), sg.InputText('100', size=(5, 1), key='-HIGH-INPUT-')],
+         [sg.Text("Low Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=60, key='-LOW-THRESH-'), sg.InputText('60', size=(5, 1), key='-LOW-INPUT-')],
+         [sg.Button("Info"), sg.Button("EMG signal"), sg.Button("Heart rate (bpm)")]
+     ])],
+    [sg.Multiline(size=(100, 10), key='-LOG-', disabled=True, font=("Helvetica", 16))],
     [sg.Button("Exit", font=("Helvetica", 16))]
 ]
 
 # Create the window
 window = sg.Window("PPG Monitor", layout, finalize=True, resizable=True)
 
-# Draw the initial plot
-fig, ax1, ax2 = create_plot()
-canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig)
+# Draw the initial plots
+(fig1, ax1), (fig2, ax2), (fig3, ax3) = create_plots()
+canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
+
+# Draw the initial alarm state
+alarm_canvas = window['-ALARM-'].TKCanvas
+draw_alarm(alarm_canvas, "normal")
 
 pulse_data = []
 heart_rate_data = []
 time_data = []
-threshold = 100  # Example threshold for high/low pulse alarm
 t = 0
 
 # Set update frequency to 1 second
 last_update_time = time.time()
 last_packet_time = time.time()
+
+# Initialize variables for adaptive threshold calculation
+alpha = 0.1
+emaValue = 1900
+adp_threshold = emaValue + 20
 
 # Main loop
 while True:
@@ -55,6 +87,26 @@ while True:
 
     if event == sg.WIN_CLOSED or event == 'Exit':
         break
+
+    # Handle graph switching buttons
+    if event == 'EMG signal':
+        canvas.get_tk_widget().pack_forget()
+        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
+    elif event == 'Heart rate (bpm)':
+        canvas.get_tk_widget().pack_forget()
+        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig2)
+    elif event == 'Info':
+        canvas.get_tk_widget().pack_forget()
+        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig3)
+
+    # Update threshold values from input fields and handle empty input gracefully
+    try:
+        high_threshold = int(values['-HIGH-INPUT-']) if values['-HIGH-INPUT-'] else int(values['-HIGH-THRESH-'])
+        low_threshold = int(values['-LOW-INPUT-']) if values['-LOW-INPUT-'] else int(values['-LOW-THRESH-'])
+        window['-HIGH-THRESH-'].update(high_threshold)
+        window['-LOW-THRESH-'].update(low_threshold)
+    except ValueError:
+        pass
 
     # Read data from serial
     if ser.in_waiting > 0:
@@ -64,8 +116,8 @@ while True:
         # Process the received line
         if line:
             try:
-                # Split the line by commas, assume the first value is the heart rate
-                data = line.split(",")
+                # Split the line by commas and strip any extra spaces
+                data = [x.strip() for x in line.split(",")]
                 heart_rate = float(data[0])  # First value is heart rate
                 pulse_values = list(map(int, data[1:]))  # Remaining values are pulse signal
 
@@ -88,9 +140,23 @@ while True:
                     time_data = time_data[-10:]  # Keep last 10 seconds of data
                     heart_rate_data = heart_rate_data[-10:]  # Same for heart rate
 
-                # Log the event
+                # Determine pulse status and log it in the required format
                 timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
-                window['-LOG-'].print(f"{timestamp}: Received Data: Heart Rate = {heart_rate:.1f} BPM")
+                if heart_rate > high_threshold:
+                    log_message = f"{timestamp}: Pulse High"
+                    draw_alarm(alarm_canvas, "high")
+                elif heart_rate < low_threshold:
+                    log_message = f"{timestamp}: Pulse Low"
+                    draw_alarm(alarm_canvas, "low")
+                else:
+                    log_message = f"{timestamp}: Pulse Normal"
+                    draw_alarm(alarm_canvas, "normal")
+                
+                window['-LOG-'].print(log_message)
+
+                # Calculate adaptive threshold
+                emaValue = (alpha * pulse_values[-1]) + ((1 - alpha) * emaValue)
+                adp_threshold = emaValue + 20
 
                 # Refresh the plot every second
                 if time.time() - last_update_time >= 1:
@@ -99,6 +165,7 @@ while True:
                     # Clear and update both plots
                     ax1.clear()
                     ax1.plot(pulse_data, label="Pulse Waveform")
+                    ax1.axhline(y=adp_threshold, color='r', linestyle='--', label="Threshold")  # Add threshold line
                     ax1.set_xlabel("Sample Points")
                     ax1.set_ylabel("Pulse Data")
                     ax1.legend()
@@ -114,12 +181,11 @@ while True:
                     canvas.draw()
 
             except Exception as e:
-                error_message = f"Error processing line: {line} - {e}"
-                window['-LOG-'].print(error_message)  # Log the error
+                # Hide error messages from the data log
+                pass
 
     # Check for packet arrival alarm
     if time.time() - last_packet_time > 5:
         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
 
 ser.close()
-window.close()
