@@ -1,63 +1,125 @@
+import PySimpleGUI as sg
 import serial
+import time
+from datetime import datetime
 import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib.animation import FuncAnimation
-import re  # Regular expression module
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Define your serial port settings
-serial_port = 'COM4'  # Adjust the port according to your setup
-baud_rate = 115200  # Updated baud rate
+# Initialize serial connection (adjust COM port and baud rate)
+ser = serial.Serial('COM5', 115200, timeout=1)  # Replace 'COM5' with your port
 
-# Create a function to initialize the plot with darkgrid style
-def create_matplotlib_fig():
-    plt.style.use('seaborn-v0_8-darkgrid')
-    fig, ax = plt.subplots()
-    line, = ax.plot([], [], lw=2)
-    ax.set_xlim(0, 100)  # Keep x-limits for the display
-    ax.set_ylim(0, 2000)  # Adjust y-limits based on expected sensor values
-    ax.set_title("Real-time Pulse Sensor Data")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Sensor Value")
-    return fig, ax, line
+# Function to draw the figure on the canvas
+def draw_figure(canvas, figure):
+    figure_canvas_agg = FigureCanvasTkAgg(figure, canvas)
+    figure_canvas_agg.draw()
+    figure_canvas_agg.get_tk_widget().pack(side='top', fill='both', expand=1)
+    return figure_canvas_agg
 
-# Update the plot in real-time
-def update_plot(frame, ser, line, x_data, y_data):
-    try:
-        if ser.in_waiting > 0:
-            data = ser.readline().decode('utf-8').strip()
-            # Split data to extract sensor value
-            parts = data.split(", ")
-            if len(parts) > 0:
-                try:
-                    sensor_value = float(parts[0])  # Get the sensor reading
-                    # Append new data
-                    x_data.append(x_data[-1] + 0.02 if x_data else 0)  # Increment x by 20ms
-                    y_data.append(sensor_value)
+# Create the initial Matplotlib figure
+def create_plot():
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))  # Increased figure size to be WAY larger
+    ax1.set_xlabel("Time")
+    ax1.set_ylabel("Pulse Data")
+    ax2.set_xlabel("Time")
+    ax2.set_ylabel("Heart Rate (BPM)")
+    return fig, ax1, ax2
 
-                    # Keep only the last 100 points for plotting
-                    if len(x_data) > 100:
-                        x_data.pop(0)
-                        y_data.pop(0)
+# Layout for the GUI
+layout = [
+    [sg.Text("Pulse Rate: "), sg.Text("0", key='-BPM-', font=("Helvetica", 50), size=(10, 1))],  # Even larger text
+    [sg.Canvas(key='-CANVAS-', size=(1200, 800))],  # Significantly larger canvas
+    [sg.Multiline(size=(100, 10), key='-LOG-', disabled=True, font=("Helvetica", 16))],  # Larger log
+    [sg.Button("Exit", font=("Helvetica", 16))]
+]
 
-                    line.set_data(x_data, y_data)
-                    plt.draw()
-                except ValueError:
-                    print("Could not convert sensor value to float.")
+# Create the window
+window = sg.Window("PPG Monitor", layout, finalize=True, resizable=True)
 
-    except Exception as e:
-        print(f"Error reading serial data: {e}")
+# Draw the initial plot
+fig, ax1, ax2 = create_plot()
+canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig)
 
-# Initialize serial communication
-ser = serial.Serial(serial_port, baud_rate, timeout=1)
+pulse_data = []
+heart_rate_data = []
+time_data = []
+threshold = 100  # Example threshold for high/low pulse alarm
+t = 0
 
-# Create plot
-fig, ax, line = create_matplotlib_fig()
-x_data, y_data = [], []
+# Set update frequency to 1 second
+last_update_time = time.time()
+last_packet_time = time.time()
 
-# Animate the plot
-ani = FuncAnimation(fig, update_plot, fargs=(ser, line, x_data, y_data), interval=20)
+# Main loop
+while True:
+    event, values = window.read(timeout=100)
 
-plt.show()
+    if event == sg.WIN_CLOSED or event == 'Exit':
+        break
 
-# Don't forget to close the serial connection when done
+    # Read data from serial
+    if ser.in_waiting > 0:
+        line = ser.readline().decode('utf-8').strip()  # Read serial data
+        last_packet_time = time.time()  # Update last packet time
+        
+        # Process the received line
+        if line:
+            try:
+                # Split the line by commas, assume the first value is the heart rate
+                data = line.split(",")
+                heart_rate = float(data[0])  # First value is heart rate
+                pulse_values = list(map(int, data[1:]))  # Remaining values are pulse signal
+
+                # Update heart rate
+                heart_rate_data.append(heart_rate)
+                window['-BPM-'].update(f"{heart_rate:.1f} BPM")
+
+                # Add time point for graph
+                time_data.append(t)
+                t += 1
+
+                # Update raw pulse data
+                pulse_data.extend(pulse_values)
+                if len(pulse_data) > 250:  # Limit the size of data to avoid memory overload
+                    pulse_data = pulse_data[-250:]
+                    time_data = time_data[-250:]
+
+                # Manage x-axis sliding window for both plots
+                if len(time_data) > 10:
+                    time_data = time_data[-10:]  # Keep last 10 seconds of data
+                    heart_rate_data = heart_rate_data[-10:]  # Same for heart rate
+
+                # Log the event
+                timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
+                window['-LOG-'].print(f"{timestamp}: Received Data: Heart Rate = {heart_rate:.1f} BPM")
+
+                # Refresh the plot every second
+                if time.time() - last_update_time >= 1:
+                    last_update_time = time.time()
+
+                    # Clear and update both plots
+                    ax1.clear()
+                    ax1.plot(pulse_data, label="Pulse Waveform")
+                    ax1.set_xlabel("Sample Points")
+                    ax1.set_ylabel("Pulse Data")
+                    ax1.legend()
+
+                    ax2.clear()
+                    ax2.plot(time_data, heart_rate_data, label="Heart Rate")
+                    ax2.set_xlim([min(time_data), max(time_data)])  # Keep last 10 seconds range
+                    ax2.set_ylim([min(heart_rate_data) - 5, max(heart_rate_data) + 5])  # Adjust Y range dynamically
+                    ax2.set_xlabel("Time (s)")
+                    ax2.set_ylabel("Heart Rate (BPM)")
+                    ax2.legend()
+
+                    canvas.draw()
+
+            except Exception as e:
+                error_message = f"Error processing line: {line} - {e}"
+                window['-LOG-'].print(error_message)  # Log the error
+
+    # Check for packet arrival alarm
+    if time.time() - last_packet_time > 5:
+        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
+
 ser.close()
+window.close()
