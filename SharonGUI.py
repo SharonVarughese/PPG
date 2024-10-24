@@ -2,17 +2,22 @@ import PySimpleGUI as sg
 import time
 import threading
 import serial
+import serial.tools.list_ports
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Initialize serial connection
-ser = serial.Serial('COM4', 115200, timeout=1)  # Change COM port if necessary
+# Bluetooth settings
+BAUD_RATE = 115200
+RECONNECT_DELAY = 2  # Retry connection every 2 seconds
 
 # Global variables for data tracking
 bpm_trend = []  # List to store BPM data over time
 pulse_waveform = []  # Store pulse waveform data (sensor values)
 x_axis = []  # X-axis to represent sample count or time
 last_packet_time = time.time()  # Track time for packet loss detection
+connected = False
+reconnect_thread_running = False
+ser = None  # Serial connection object
 
 # Function to create a matplotlib figure for embedding
 def draw_figure(canvas, figure):
@@ -21,13 +26,53 @@ def draw_figure(canvas, figure):
     figure_canvas_agg.get_tk_widget().pack(side='top', fill='both', expand=1)
     return figure_canvas_agg
 
-# Function to read data from the ESP32
+# Function to check if any serial port is available and return the available port
+def get_available_port():
+    available_ports = serial.tools.list_ports.comports()
+    for port in available_ports:
+        if "COM" in port.device:  # Windows - you can add more specific checks if needed
+            return port.device
+    return None
+
+# Function to handle Bluetooth connection and reconnection
+def bluetooth_connect():
+    global connected, ser, reconnect_thread_running
+    start_time = time.time()
+
+    while not connected:
+        try:
+            # Scan for available ports
+            port = get_available_port()
+            if not port:
+                window.write_event_value('-LOG-', "No available ports. Waiting for device...")
+                time.sleep(RECONNECT_DELAY)
+                continue
+
+            # Attempt to connect
+            ser = serial.Serial(port, BAUD_RATE, timeout=1)
+            window.write_event_value('-LOG-', f"Connected to {port}")
+            connected = True
+        except serial.SerialException as e:
+            # Reattempt connection every RECONNECT_DELAY until timeout is reached
+            window.write_event_value('-LOG-', f"Connection failed: {e}. Retrying in {RECONNECT_DELAY} seconds...")
+            time.sleep(RECONNECT_DELAY)
+            # Check if we've exceeded the maximum connection timeout
+            if time.time() - start_time > CONNECTION_TIMEOUT:
+                window.write_event_value('-LOG-', "Failed to reconnect within 10 seconds. Continuing attempts...")
+                start_time = time.time()  # Reset the timer to continue trying
+
+    reconnect_thread_running = False  # Set flag to false once connected
+    return ser
+
+# Function to read data from the ESP32 via Bluetooth
 def read_from_esp():
-    global last_packet_time
+    global last_packet_time, connected, reconnect_thread_running, ser
     buffer = []  # Buffer to store multi-line data
+    ser = bluetooth_connect()
+
     while True:
         try:
-            if ser.in_waiting > 0:
+            if ser.is_open and ser.in_waiting > 0:
                 data = ser.readline().decode('utf-8').strip()
                 if data:
                     buffer.append(data)
@@ -38,8 +83,20 @@ def read_from_esp():
                     last_packet_time = time.time()  # Update packet arrival time
                     buffer.clear()
 
-        except Exception as e:
-            print(f"Error reading from ESP32: {e}")
+        except serial.SerialException as e:
+            window.write_event_value('-LOG-', f"Connection lost: {e}. Trying to reconnect...")
+            connected = False
+            if ser:
+                ser.close()  # Close the serial connection on failure
+            if not reconnect_thread_running:
+                threading.Thread(target=bluetooth_connect, daemon=True).start()
+                reconnect_thread_running = True
+
+        except KeyboardInterrupt:
+            window.write_event_value('-LOG-', "Exiting...")
+            if connected and ser:
+                ser.close()
+            break
 
 # GUI layout
 layout = [
@@ -73,7 +130,7 @@ ax2.set_xlabel("Time (seconds)", fontsize=12)
 fig_canvas_agg1 = draw_figure(window['-CANVAS1-'].TKCanvas, fig1)
 fig_canvas_agg2 = draw_figure(window['-CANVAS2-'].TKCanvas, fig2)
 
-# Start thread to read data from ESP32
+# Start thread to read data from ESP32 via Bluetooth
 threading.Thread(target=read_from_esp, daemon=True).start()
 
 # Function to update the GUI with real-time data
@@ -158,7 +215,12 @@ while True:
 
         # Check for packet loss
         if time.time() - last_packet_time > 5:
-            window['-ALARM-'].update("Alarm: No Packet Received for 5 Seconds!", text_color='orange')
+            window['-ALARM-'].update("Alarm: No Packet Received for 5 Seconds! Attempting to reconnect...", text_color='orange')
+            window['-LOG-'].print("Alarm: No Packet Received for 5 Seconds! Attempting to reconnect...")
+
+        # Display connection and reconnection logs in the log window
+        if event == '-LOG-':
+            window['-LOG-'].print(values[event])
 
     except Exception as e:
         print(f"Error in event loop: {e}")
