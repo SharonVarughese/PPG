@@ -17,7 +17,7 @@ def draw_figure(canvas, figure):
 
 # Create the initial Matplotlib figures
 def create_plots():
-    fig1, ax1 = plt.subplots(figsize=(15, 12))  # EMG signal plot
+    fig1, ax1 = plt.subplots(figsize=(15, 12))  # PPG signal plot
     ax1.set_xlabel("Sample Points")
     ax1.set_ylabel("Pulse Data")
 
@@ -25,11 +25,7 @@ def create_plots():
     ax2.set_xlabel("Time (s)")
     ax2.set_ylabel("Heart Rate (BPM)")
 
-    fig3, ax3 = plt.subplots(figsize=(15, 12))  # Info plot (placeholder for now)
-    ax3.set_xlabel("Info")
-    ax3.set_ylabel("Details")
-
-    return (fig1, ax1), (fig2, ax2), (fig3, ax3)
+    return (fig1, ax1), (fig2, ax2)
 
 # Function to draw the alarm LEDs
 def draw_alarm(canvas, state):
@@ -50,7 +46,7 @@ layout = [
          [sg.Canvas(key='-ALARM-', size=(300, 100))],
          [sg.Text("High Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=100, key='-HIGH-THRESH-'), sg.InputText('100', size=(5, 1), key='-HIGH-INPUT-')],
          [sg.Text("Low Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=60, key='-LOW-THRESH-'), sg.InputText('60', size=(5, 1), key='-LOW-INPUT-')],
-         [sg.Button("Info"), sg.Button("EMG signal"), sg.Button("Heart rate (bpm)")]
+         [sg.Button("Info"), sg.Button("PPG signal"), sg.Button("Heart rate (bpm)")]
      ])],
     [sg.Multiline(size=(100, 10), key='-LOG-', disabled=True, font=("Helvetica", 16))],
     [sg.Button("Exit", font=("Helvetica", 16))]
@@ -60,7 +56,7 @@ layout = [
 window = sg.Window("PPG Monitor", layout, finalize=True, resizable=True)
 
 # Draw the initial plots
-(fig1, ax1), (fig2, ax2), (fig3, ax3) = create_plots()
+(fig1, ax1), (fig2, ax2) = create_plots()
 canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
 
 # Draw the initial alarm state
@@ -76,10 +72,9 @@ t = 0
 last_update_time = time.time()
 last_packet_time = time.time()
 
-# Initialize variables for adaptive threshold calculation
-alpha = 0.1
-emaValue = 1900
-adp_threshold = emaValue + 20
+# Initialize heart_rate to None before the main loop
+heart_rate = None
+adp_threshold = None  # Initialize adp_threshold to None
 
 # Main loop
 while True:
@@ -89,15 +84,18 @@ while True:
         break
 
     # Handle graph switching buttons
-    if event == 'EMG signal':
+    if event == 'PPG signal':
         canvas.get_tk_widget().pack_forget()
         canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
+        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display PPG signal")
     elif event == 'Heart rate (bpm)':
         canvas.get_tk_widget().pack_forget()
         canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig2)
+        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display heart rate (bpm)")
     elif event == 'Info':
         canvas.get_tk_widget().pack_forget()
-        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig3)
+        window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
+        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
 
     # Update threshold values from input fields and handle empty input gracefully
     try:
@@ -112,80 +110,75 @@ while True:
     if ser.in_waiting > 0:
         line = ser.readline().decode('utf-8').strip()  # Read serial data
         last_packet_time = time.time()  # Update last packet time
-        
+
         # Process the received line
         if line:
             try:
-                # Split the line by commas and strip any extra spaces
-                data = [x.strip() for x in line.split(",")]
-                heart_rate = float(data[0])  # First value is heart rate
-                pulse_values = list(map(int, data[1:]))  # Remaining values are pulse signal
+                # Split the line by commas (First line has 50 data points)
+                if "," in line:
+                    pulse_values = [int(val.strip()) for val in line.split(",")]
+                    pulse_data.extend(pulse_values)
+                  
 
-                # Update heart rate
-                heart_rate_data.append(heart_rate)
-                window['-BPM-'].update(f"{heart_rate:.1f} BPM")
+                    # Keep the pulse data at manageable size (last 250 samples)
+                    if len(pulse_data) > 250:
+                        pulse_data = pulse_data[-250:]
 
-                # Add time point for graph
-                time_data.append(t)
-                t += 1
-
-                # Update raw pulse data
-                pulse_data.extend(pulse_values)
-                if len(pulse_data) > 250:  # Limit the size of data to avoid memory overload
-                    pulse_data = pulse_data[-250:]
-                    time_data = time_data[-250:]
-
-                # Manage x-axis sliding window for both plots
-                if len(time_data) > 10:
-                    time_data = time_data[-10:]  # Keep last 10 seconds of data
-                    heart_rate_data = heart_rate_data[-10:]  # Same for heart rate
-
-                # Determine pulse status and log it in the required format
-                timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
-                if heart_rate > high_threshold:
-                    log_message = f"{timestamp}: Pulse High"
-                    draw_alarm(alarm_canvas, "high")
-                elif heart_rate < low_threshold:
-                    log_message = f"{timestamp}: Pulse Low"
-                    draw_alarm(alarm_canvas, "low")
-                else:
-                    log_message = f"{timestamp}: Pulse Normal"
-                    draw_alarm(alarm_canvas, "normal")
-                
-                window['-LOG-'].print(log_message)
-
-                # Calculate adaptive threshold
-                emaValue = (alpha * pulse_values[-1]) + ((1 - alpha) * emaValue)
-                adp_threshold = emaValue + 20
-
-                # Refresh the plot every second
-                if time.time() - last_update_time >= 1:
-                    last_update_time = time.time()
-
-                    # Clear and update both plots
+                    # Plot the pulse data
                     ax1.clear()
                     ax1.plot(pulse_data, label="Pulse Waveform")
-                    ax1.axhline(y=adp_threshold, color='r', linestyle='--', label="Threshold")  # Add threshold line
-                    ax1.set_xlabel("Sample Points")
-                    ax1.set_ylabel("Pulse Data")
+                    if adp_threshold is not None:
+                        ax1.axhline(y=adp_threshold, color='r', linestyle='--', label="Threshold")  # Add threshold line
                     ax1.legend()
-
-                    ax2.clear()
-                    ax2.plot(time_data, heart_rate_data, label="Heart Rate")
-                    ax2.set_xlim([min(time_data), max(time_data)])  # Keep last 10 seconds range
-                    ax2.set_ylim([min(heart_rate_data) - 5, max(heart_rate_data) + 5])  # Adjust Y range dynamically
-                    ax2.set_xlabel("Time (s)")
-                    ax2.set_ylabel("Heart Rate (BPM)")
-                    ax2.legend()
-
                     canvas.draw()
 
-            except Exception as e:
-                # Hide error messages from the data log
+                # Second line: Heart rate
+                elif len(line.split(".")) == 2:  # Detect heart rate line (float)
+                    heart_rate = float(line.strip())
+                    heart_rate_data.append(heart_rate)
+                    window['-BPM-'].update(f"{heart_rate:.1f} BPM")
+                    
+
+                    # Manage x-axis sliding window for heart rate data
+                    if len(time_data) > 10:
+                        time_data = time_data[-10:]
+                        heart_rate_data = heart_rate_data[-10:]
+
+                    # Plot heart rate data
+                    ax2.clear()
+                    ax2.plot(time_data, heart_rate_data, label="Heart Rate")
+                    ax2.legend()
+                    canvas.draw()
+
+                # Third line: adp_threshold
+                else:  # Third line (int value)
+                    adp_threshold = int(line.strip())
+                   
+
+                # Update time data
+                t += 1
+                time_data.append(t)
+
+                # Check if heart_rate has a value before evaluating thresholds
+                if heart_rate is not None:
+                    timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
+                    if heart_rate > high_threshold:
+                        log_message = f"{timestamp}: Pulse High"
+                        draw_alarm(alarm_canvas, "high")
+                    elif heart_rate < low_threshold:
+                        log_message = f"{timestamp}: Pulse Low"
+                        draw_alarm(alarm_canvas, "low")
+                    else:
+                        log_message = f"{timestamp}: Pulse Normal"
+                        draw_alarm(alarm_canvas, "normal")
+                    
+                    window['-LOG-'].print(log_message)
+
+            except ValueError as e:
                 pass
 
-    # Check for packet arrival alarm
-    if time.time() - last_packet_time > 5:
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
+# Check for packet arrival alarm
+if time.time() - last_packet_time > 5:
+    window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
 
-ser.close()
+window.close()
