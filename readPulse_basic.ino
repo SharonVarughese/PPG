@@ -10,7 +10,7 @@
 #define TICK_20MSEC 20000
 #define TICK_1SEC 50
 #define DEBOUNCE_CNT 5
-#define DEBOUNCE_DELAY 50 
+#define DEBOUNCE_DELAY 10 
 Switch switch_1(1, DEBOUNCE_CNT);
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
@@ -57,14 +57,7 @@ void checkSwitch() {
   int reading = digitalRead(SWITCH_PIN);
 
   // If the switch state changed (due to noise or pressing)
-  if (reading != lastSwitchState) {
-    lastDebounceTime = millis();  // reset the debounce timer
-  }
-
   // Only toggle the LED if the new state has been stable for the debounce delay
-  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
-    // Whatever the reading is at, it’s been there for longer than the debounce
-    // delay, so take it as the actual current state:
     if (reading != switchState) {
       switchState = reading;
 
@@ -78,9 +71,6 @@ void checkSwitch() {
         }
       }
     }
-  }
-
-  lastSwitchState = reading;
 }
 void setup() {
   
@@ -141,12 +131,13 @@ void loop() {
 
     old_state = current_state;
     tick_1_sec++;
+    buffer_indicator++;
   }
 
   // If the switch is off (led1Enabled = false), LED1 stays off
   if (!led1Enabled && (micros() - last_tick_time) > TICK_20MSEC) {
     digitalWrite(LED1_PIN, LOW);  // Ensure LED1 is off if disabled
-        last_tick_time = micros();
+    last_tick_time = micros();
 
     sensor_reading = analogRead(SENSOR_PIN);
     sprintf(raw_pulse_data + buffer_indicator*5, "%4d,", sensor_reading);
@@ -162,6 +153,7 @@ void loop() {
     }
     old_state = current_state;
     tick_1_sec++;
+    buffer_indicator++;
     //Serial.printf("%d,%d\n",sensor_reading,adp_threshold);
   }
   
@@ -173,9 +165,9 @@ void loop() {
     }
     tick_1_sec = 0;
     sprintf(raw_pulse_data + 249, "\n");
-    Serial.printf(raw_pulse_data);
-    Serial.printf("%f\n", heart_rate);
-    Serial.printf("%d\n", adp_threshold);
+    SerialBT.printf(raw_pulse_data);
+    SerialBT.printf("%f\n", heart_rate);
+    SerialBT.printf("%d\n", adp_threshold);
   }
 }
 
