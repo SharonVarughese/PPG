@@ -47,7 +47,7 @@ int adp_threshold = 0;
 float alpha = 0.01;
 float emaValue = 1900;
 float heart_rate;
-int order = 1;
+static int order = 1;
 
 unsigned long lastDebounceTime = 0;
 int lastSwitchState = LOW;
