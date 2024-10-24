@@ -1,6 +1,5 @@
 
 #include "BluetoothSerial.h"
-#include "switch.h"
 
 #define LED1_PIN 32
 #define LED2_PIN 35
@@ -11,7 +10,7 @@
 #define TICK_1SEC 50
 #define DEBOUNCE_CNT 5
 #define DEBOUNCE_DELAY 10 
-Switch switch_1(1, DEBOUNCE_CNT);
+
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -39,7 +38,7 @@ unsigned long pulse_period;
 
 unsigned long last_tick_time;
 uint16_t tick_1_sec = 0;  
-char raw_pulse_data[251];
+char raw_pulse_data[300];
 int buffer_indicator_2 = 1;
 static int buffer_indicator = 0;
 
@@ -48,6 +47,7 @@ int adp_threshold = 0;
 float alpha = 0.01;
 float emaValue = 1900;
 float heart_rate;
+int order = 1;
 
 unsigned long lastDebounceTime = 0;
 int lastSwitchState = LOW;
@@ -168,6 +168,8 @@ void loop() {
     SerialBT.printf(raw_pulse_data);
     SerialBT.printf("%f\n", heart_rate);
     SerialBT.printf("%d\n", adp_threshold);
+    SerialBT.printf("%d\n", order);
+    order++;
   }
 }
 
