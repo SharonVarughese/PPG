@@ -1,6 +1,5 @@
 
 #include "BluetoothSerial.h"
-#include "switch.h"
 
 #define LED1_PIN 32
 #define LED2_PIN 35
@@ -11,7 +10,6 @@
 #define TICK_1SEC 50
 #define DEBOUNCE_CNT 5
 #define DEBOUNCE_DELAY 10 
-Switch switch_1(1, DEBOUNCE_CNT);
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
