@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import struct
+
 
 # Initialize packet sequence number
 packet_sequence_number = 0
@@ -228,14 +228,7 @@ while True:
             except ValueError:
                 pass
 
-    # Send data packet every second
-    current_time = time.time()
-    if current_time - last_packet_time >= 1.0:
-        if heart_rate is not None and len(pulse_data) >= 50:
-            # Send the data packet
-            send_data_packet(heart_rate, pulse_data[-50:])
-            last_packet_time = current_time
-
+  
     # Check for packet loss (if 5 seconds have passed since the last packet)
     elif time.time() - last_packet_time > 5:
         if time.time() - last_log_time > 1:  # Only log once per second
