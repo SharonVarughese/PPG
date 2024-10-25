@@ -4,6 +4,14 @@ import time
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import struct
+
+# Initialize packet sequence number
+packet_sequence_number = 0
+
+def send_data_packet(pulse_rate, raw_sensor_data):
+    global packet_sequence_number
+    packet_sequence_number += 1
 
 # Initialize serial connection (adjust COM port and baud rate)
 ser = serial.Serial('COM5', 115200, timeout=100)  # Replace 'COM5' with your port
@@ -18,7 +26,7 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
     y = filtfilt(b, a, data)
     return y
 fs = 1000  # Sampling frequency in Hz
-cutoff = 30  # Desired cutoff frequency in Hz
+cutoff = 2.5  # Desired cutoff frequency in Hz
 
 # Add this text at the beginning of your code
 info_text = (
@@ -219,6 +227,14 @@ while True:
 
             except ValueError:
                 pass
+
+    # Send data packet every second
+    current_time = time.time()
+    if current_time - last_packet_time >= 1.0:
+        if heart_rate is not None and len(pulse_data) >= 50:
+            # Send the data packet
+            send_data_packet(heart_rate, pulse_data[-50:])
+            last_packet_time = current_time
 
     # Check for packet loss (if 5 seconds have passed since the last packet)
     elif time.time() - last_packet_time > 5:
