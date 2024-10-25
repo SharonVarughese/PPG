@@ -6,7 +6,23 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # Initialize serial connection (adjust COM port and baud rate)
-ser = serial.Serial('COM5', 115200, timeout=1)  # Replace 'COM5' with your port
+ser = serial.Serial('COM5', 115200, timeout=100)  # Replace 'COM5' with your port
+import numpy as np
+from scipy.signal import butter, filtfilt
+
+# Function to apply Butterworth low-pass filter
+def butter_lowpass_filter(data, cutoff, fs, order=5):
+    nyquist = 0.5 * fs
+    normal_cutoff = cutoff / nyquist
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    y = filtfilt(b, a, data)
+    return y
+fs = 1000  # Sampling frequency in Hz
+cutoff = 30  # Desired cutoff frequency in Hz
+
+# Example usage
+fs = 1000  # Sampling frequency in Hz
+cutoff = 50  # Desired cutoff frequency in Hz
 
 # Function to draw the figure on the canvas
 def draw_figure(canvas, figure):
@@ -71,6 +87,7 @@ t = 0
 # Set update frequency to 1 second
 last_update_time = time.time()
 last_packet_time = time.time()
+last_log_time = time.time()  # Initialize the last log update time
 
 # Initialize heart_rate to None before the main loop
 heart_rate = None
@@ -119,7 +136,6 @@ while True:
                     pulse_values = [int(val.strip()) for val in line.split(",")]
                     pulse_data.extend(pulse_values)
                   
-
                     # Keep the pulse data at manageable size (last 250 samples)
                     if len(pulse_data) > 250:
                         pulse_data = pulse_data[-250:]
@@ -137,7 +153,6 @@ while True:
                     heart_rate = float(line.strip())
                     heart_rate_data.append(heart_rate)
                     window['-BPM-'].update(f"{heart_rate:.1f} BPM")
-                    
 
                     # Manage x-axis sliding window for heart rate data
                     if len(time_data) > 10:
@@ -153,32 +168,41 @@ while True:
                 # Third line: adp_threshold
                 else:  # Third line (int value)
                     adp_threshold = int(line.strip())
-                   
 
                 # Update time data
                 t += 1
                 time_data.append(t)
 
-                # Check if heart_rate has a value before evaluating thresholds
-                if heart_rate is not None:
-                    timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
-                    if heart_rate > high_threshold:
-                        log_message = f"{timestamp}: Pulse High"
-                        draw_alarm(alarm_canvas, "high")
-                    elif heart_rate < low_threshold:
-                        log_message = f"{timestamp}: Pulse Low"
-                        draw_alarm(alarm_canvas, "low")
-                    else:
-                        log_message = f"{timestamp}: Pulse Normal"
-                        draw_alarm(alarm_canvas, "normal")
-                    
-                    window['-LOG-'].print(log_message)
+                # Only log once per second to avoid double logging
+                current_time = time.time()
+                if current_time - last_log_time >= 0.8:
+                    if heart_rate is not None:
+                        timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
+                        if heart_rate > high_threshold:
+                            log_message = f"{timestamp}: Pulse High"
+                            draw_alarm(alarm_canvas, "high")
+                        elif heart_rate < low_threshold:
+                            log_message = f"{timestamp}: Pulse Low"
+                            draw_alarm(alarm_canvas, "low")
+                        else:
+                            log_message = f"{timestamp}: Pulse Normal"
+                            draw_alarm(alarm_canvas, "normal")
 
-            except ValueError as e:
+                        window['-LOG-'].print(log_message)
+                        last_log_time = current_time  # Update the last log update time
+
+            except ValueError:
                 pass
 
-# Check for packet arrival alarm
-if time.time() - last_packet_time > 5:
-    window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
+    # Check for packet loss (if 5 seconds have passed since the last packet)
+    elif time.time() - last_packet_time > 5:
+        if time.time() - last_log_time > 1:  # Only log once per second
+            window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
+            last_log_time = time.time()  # Update log time
 
+    # Keep the GUI responsive
+    window.refresh()
+
+# Close serial and GUI on exit
+ser.close()
 window.close()
