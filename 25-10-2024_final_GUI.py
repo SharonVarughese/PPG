@@ -59,9 +59,9 @@ layout = [
     [sg.Text("Pulse Rate: "), sg.Text("0", key='-BPM-', font=("Helvetica", 50), size=(10, 1))],
     [sg.Canvas(key='-CANVAS-', size=(1200, 800)),
      sg.Column([
-         [sg.Canvas(key='-ALARM-', size=(300, 100))],
-         [sg.Text("High Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=100, key='-HIGH-THRESH-'), sg.InputText('100', size=(5, 1), key='-HIGH-INPUT-')],
-         [sg.Text("Low Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(20, 15), default_value=60, key='-LOW-THRESH-'), sg.InputText('60', size=(5, 1), key='-LOW-INPUT-')],
+         [sg.Canvas(key='-ALARM-', size=(300, 150))],
+         [sg.Text("High Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(40, 20), default_value=100, key='-HIGH-THRESH-'), sg.InputText('100', size=(5, 1), key='-HIGH-INPUT-')],
+         [sg.Text("Low Pulse Threshold"), sg.Slider(range=(50, 150), orientation='h', size=(40, 20), default_value=60, key='-LOW-THRESH-'), sg.InputText('60', size=(5, 1), key='-LOW-INPUT-')],
          [sg.Button("Info"), sg.Button("PPG signal"), sg.Button("Heart rate (bpm)")]
      ])],
     [sg.Multiline(size=(100, 10), key='-LOG-', disabled=True, font=("Helvetica", 16))],
