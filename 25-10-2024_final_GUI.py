@@ -20,9 +20,22 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
 fs = 1000  # Sampling frequency in Hz
 cutoff = 30  # Desired cutoff frequency in Hz
 
-# Example usage
-fs = 1000  # Sampling frequency in Hz
-cutoff = 50  # Desired cutoff frequency in Hz
+# Add this text at the beginning of your code
+info_text = (
+    
+    "A Photoplethysmography (PPG) sensor measures blood volume changes in \n\n"
+    "the microvascular bed of tissue. It uses light to detect variations in \n\n"
+    "blood flow, providing real-time information about heart rate and \n\n"
+    "vascular health.\n\n"
+    "\n\n"
+ 
+    "The Butterworth low-pass filter is used to eliminate high-frequency noise \n\n"
+    "from PPG signals while preserving the desired low-frequency components. \n\n"
+    "With a smooth frequency response, it effectively attenuates frequencies \n\n"
+    "above a specified cutoff (e.g., 50 Hz), ensuring cleaner signal processing \n\n"
+    "for accurate heart rate detection."
+)
+
 
 # Function to draw the figure on the canvas
 def draw_figure(canvas, figure):
@@ -109,10 +122,23 @@ while True:
         canvas.get_tk_widget().pack_forget()
         canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig2)
         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display heart rate (bpm)")
+    # Update the event loop for the "Info" button
     elif event == 'Info':
-        canvas.get_tk_widget().pack_forget()
-        window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
+         canvas.get_tk_widget().pack_forget()
+        # Clear the canvas
+         window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
+    
+         # Draw the information text on the canvas
+         window['-CANVAS-'].TKCanvas.create_text(
+             window['-CANVAS-'].TKCanvas.winfo_width() // 2,
+             window['-CANVAS-'].TKCanvas.winfo_height() // 2,
+             text=info_text,
+             fill="black",
+             font=("Helvetica", 20),
+             anchor='center',
+             justify='left'
+         )
+         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
 
     # Update threshold values from input fields and handle empty input gracefully
     try:
