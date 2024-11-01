@@ -2,9 +2,10 @@ import PySimpleGUI as sg
 import serial
 import time
 from datetime import datetime
+import numpy as np
+from scipy.signal import butter, filtfilt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
 
 # Initialize packet sequence number and serial communication
 packet_sequence_number = 0
@@ -12,8 +13,6 @@ last_sequence_number = -1
 
 # Initialize serial connection (adjust COM port and baud rate)
 ser = serial.Serial('COM5', 115200, timeout=100)  # Replace 'COM5' with your port
-import numpy as np
-from scipy.signal import butter, filtfilt
 
 # Function to apply Butterworth low-pass filter
 def butter_lowpass_filter(data, cutoff, fs, order=5):
@@ -22,25 +21,23 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
     b, a = butter(order, normal_cutoff, btype='low', analog=False)
     y = filtfilt(b, a, data)
     return y
-fs = 1000  # Sampling frequency in Hz
+
+fs = 50  # Sampling frequency in Hz (adjust as needed)
 cutoff = 2.5  # Desired cutoff frequency in Hz
 
 # Add this text at the beginning of your code
 info_text = (
-    
     "A Photoplethysmography (PPG) sensor measures blood volume changes in \n\n"
     "the microvascular bed of tissue. It uses light to detect variations in \n\n"
     "blood flow, providing real-time information about heart rate and \n\n"
     "vascular health.\n\n"
     "\n\n"
- 
     "The Butterworth low-pass filter is used to eliminate high-frequency noise \n\n"
     "from PPG signals while preserving the desired low-frequency components. \n\n"
     "With a smooth frequency response, it effectively attenuates frequencies \n\n"
-    "above a specified cutoff (e.g., 50 Hz), ensuring cleaner signal processing \n\n"
+    "above a specified cutoff (e.g., 2.5 Hz), ensuring cleaner signal processing \n\n"
     "for accurate heart rate detection."
 )
-
 
 # Function to draw the figure on the canvas
 def draw_figure(canvas, figure):
@@ -98,6 +95,7 @@ alarm_canvas = window['-ALARM-'].TKCanvas
 draw_alarm(alarm_canvas, "normal")
 
 pulse_data = []
+filtered_pulse_data = []
 heart_rate_data = []
 time_data = []
 t = 0
@@ -127,23 +125,19 @@ while True:
         canvas.get_tk_widget().pack_forget()
         canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig2)
         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display heart rate (bpm)")
-    # Update the event loop for the "Info" button
     elif event == 'Info':
-         canvas.get_tk_widget().pack_forget()
-        # Clear the canvas
-         window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
-    
-         # Draw the information text on the canvas
-         window['-CANVAS-'].TKCanvas.create_text(
-             window['-CANVAS-'].TKCanvas.winfo_width() // 2,
-             window['-CANVAS-'].TKCanvas.winfo_height() // 2,
-             text=info_text,
-             fill="black",
-             font=("Helvetica", 20),
-             anchor='center',
-             justify='left'
-         )
-         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
+        canvas.get_tk_widget().pack_forget()
+        window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
+        window['-CANVAS-'].TKCanvas.create_text(
+            window['-CANVAS-'].TKCanvas.winfo_width() // 2,
+            window['-CANVAS-'].TKCanvas.winfo_height() // 2,
+            text=info_text,
+            fill="black",
+            font=("Helvetica", 20),
+            anchor='center',
+            justify='left'
+        )
+        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
 
     # Update threshold values from input fields and handle empty input gracefully
     try:
@@ -162,27 +156,32 @@ while True:
         # Process the received line
         if line:
             try:
-                # Process received packet data
                 if line.startswith("R,"):  # Raw pulse data
                     pulse_values = [int(val.strip()) for val in line[2:].split(",")]
                     pulse_data.extend(pulse_values)
-                  
-                    # Keep the pulse data at manageable size (last 250 samples)
-                    if len(pulse_data) > 250:
-                        pulse_data = pulse_data[-250:]
+
+                    # Apply low-pass filter
+                    filtered_pulse_data = butter_lowpass_filter(pulse_data, cutoff, fs)
+
+                    # Keep the pulse data at a manageable size (last 250 samples)
+                    if len(pulse_data) > 100:
+                        pulse_data = pulse_data[-100:]
+                        filtered_pulse_data = filtered_pulse_data[-100:]
 
                     # Plot the pulse data
                     ax1.clear()
-                    ax1.plot(pulse_data, label="Pulse Waveform")
+                    ax1.plot(pulse_data, label="Raw Pulse Data", alpha=0.5)
+                    ax1.plot(filtered_pulse_data, label="Filtered Pulse Data", linestyle='--', color='blue')
                     if adp_threshold is not None:
-                        ax1.axhline(y=adp_threshold, color='r', linestyle='--', label="Threshold")  # Add threshold line
+                        ax1.axhline(y=adp_threshold, color='r', linestyle='--', label="Threshold")
                     ax1.legend()
                     canvas.draw()
 
                 elif line.startswith("H,"):  # Heart rate data
                     heart_rate = float(line[2:])
-                    heart_rate_data.append(heart_rate)
-                    window['-BPM-'].update(f"{heart_rate:.1f} BPM")
+                    if heart_rate <= 120:  # Ignore readings above 120 BPM
+                        heart_rate_data.append(heart_rate)
+                        window['-BPM-'].update(f"{heart_rate:.1f} BPM")
 
                     # Manage x-axis sliding window for heart rate data
                     if len(time_data) > 10:
@@ -197,18 +196,26 @@ while True:
 
                 elif line.startswith("T,"):  # Adaptive threshold
                     adp_threshold = int(line[2:])
-                    
+
                 elif line.startswith("S,"):  # Sequence number
                     packet_sequence_number = int(line[2:])
+    
+    # Check if the packet sequence is in order and print the sequence number in the log
                     if packet_sequence_number != last_sequence_number + 1:
-                        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet out of order!")
+                           window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet out of order! Order: {packet_sequence_number}")
+                    else:
+        # Update log with packet order if in sequence
+                         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet received. Order: {packet_sequence_number}")
+
                     last_sequence_number = packet_sequence_number
+
+
 
                 # Update time data
                 t += 1
                 time_data.append(t)
 
-                # Only log once per second to avoid double logging
+                # Log only once per second
                 current_time = time.time()
                 if current_time - last_log_time >= 0.8:
                     if heart_rate is not None:
@@ -224,21 +231,23 @@ while True:
                             draw_alarm(alarm_canvas, "normal")
 
                         window['-LOG-'].print(log_message)
-                        last_log_time = current_time  # Update the last log update time
+                        last_log_time = current_time
+            
 
             except ValueError:
                 pass
 
-  
     # Check for packet loss (if 5 seconds have passed since the last packet)
     elif time.time() - last_packet_time > 5:
-        if time.time() - last_log_time > 1:  # Only log once per second
+        if time.time() - last_log_time > 1:  # Log only once per second
             window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
-            last_log_time = time.time()  # Update log time
+            last_log_time = time.time()
 
     # Keep the GUI responsive
     window.refresh()
 
+
 # Close serial and GUI on exit
 ser.close()
 window.close()
+
