@@ -1,30 +1,41 @@
 import PySimpleGUI as sg
 import serial
 import time
+import threading
 from datetime import datetime
 import numpy as np
 from scipy.signal import butter, filtfilt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Initialize packet sequence number and serial communication
+# Initialize packet sequence number and serial communication variables
 packet_sequence_number = 0
 last_sequence_number = -1
+ser = None
+connection_attempting = False  # Flag to manage reconnection state
 
-# Function to establish or reconnect the serial connection
+# Function to establish or reconnect the serial connection in a separate thread
 def connect_serial(port, baud_rate, timeout=100):
-    while True:
+    global ser, connection_attempting
+    connection_attempting = True
+    while connection_attempting:
         try:
             ser = serial.Serial(port, baud_rate, timeout=timeout)
             if ser.is_open:
                 sg.popup_auto_close("Connection established with microcontroller.")
-                return ser
+                connection_attempting = False  # Stop reconnecting once connected
+                return
         except serial.SerialException:
             sg.popup_auto_close("Attempting to reconnect to the microcontroller...")
             time.sleep(2)  # Wait before retrying
 
-# Initialize serial connection (adjust COM port and baud rate)
-ser = connect_serial('COM5', 115200)
+# Function to start the reconnection process in a thread
+def start_reconnection(port, baud_rate):
+    reconnection_thread = threading.Thread(target=connect_serial, args=(port, baud_rate), daemon=True)
+    reconnection_thread.start()
+
+# Start initial connection
+start_reconnection('COM5', 115200)
 
 # Function to apply Butterworth low-pass filter
 def butter_lowpass_filter(data, cutoff, fs, order=5):
@@ -161,13 +172,13 @@ while True:
         pass
 
     # Attempt reconnection if the connection is lost
-    if not ser.is_open:
+    if ser and not ser.is_open:
         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Connection lost. Attempting to reconnect...")
         ser.close()
-        ser = connect_serial('COM5', 115200)
+        start_reconnection('COM5', 115200)
 
     # Read data from serial
-    if ser.in_waiting > 0:
+    if ser and ser.is_open and ser.in_waiting > 0:
         line = ser.readline().decode('utf-8').strip()  # Read serial data
         last_packet_time = time.time()  # Update last packet time
 
@@ -258,5 +269,6 @@ while True:
     window.refresh()
 
 # Close serial and GUI on exit
-ser.close()
+if ser:
+    ser.close()
 window.close()
