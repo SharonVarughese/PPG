@@ -1,41 +1,42 @@
 import PySimpleGUI as sg
 import serial
 import time
-import threading
 from datetime import datetime
 import numpy as np
 from scipy.signal import butter, filtfilt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Initialize packet sequence number and serial communication variables
+# Initialize packet sequence number and serial communication
 packet_sequence_number = 0
 last_sequence_number = -1
-ser = None
-connection_attempting = False  # Flag to manage reconnection state
 
-# Function to establish or reconnect the serial connection in a separate thread
+# Function to establish or reconnect the serial connection
 def connect_serial(port, baud_rate, timeout=100):
-    global ser, connection_attempting
-    connection_attempting = True
-    while connection_attempting:
+    ser = None
+    while not ser:
         try:
             ser = serial.Serial(port, baud_rate, timeout=timeout)
             if ser.is_open:
                 sg.popup_auto_close("Connection established with microcontroller.")
-                connection_attempting = False  # Stop reconnecting once connected
-                return
+                return ser
         except serial.SerialException:
             sg.popup_auto_close("Attempting to reconnect to the microcontroller...")
             time.sleep(2)  # Wait before retrying
 
-# Function to start the reconnection process in a thread
-def start_reconnection(port, baud_rate):
-    reconnection_thread = threading.Thread(target=connect_serial, args=(port, baud_rate), daemon=True)
-    reconnection_thread.start()
+# Initialize serial connection (adjust COM port and baud rate)
+ser = connect_serial('COM5', 115200)
 
-# Start initial connection
-start_reconnection('COM5', 115200)
+# Function to handle reconnection logic when connection is lost
+def check_connection(ser, port, baud_rate):
+    try:
+        if not ser.is_open:
+            ser.close()
+            raise serial.SerialException("Port not open")
+    except (serial.SerialException, OSError):
+        sg.popup_auto_close("Connection lost. Attempting to reconnect...")
+        ser = connect_serial(port, baud_rate)
+    return ser
 
 # Function to apply Butterworth low-pass filter
 def butter_lowpass_filter(data, cutoff, fs, order=5):
@@ -45,22 +46,9 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
     y = filtfilt(b, a, data)
     return y
 
-fs = 50  # Sampling frequency in Hz (adjust as needed)
-cutoff = 2.5  # Desired cutoff frequency in Hz
-
-# Add this text at the beginning of your code
-info_text = (
-    "A Photoplethysmography (PPG) sensor measures blood volume changes in \n\n"
-    "the microvascular bed of tissue. It uses light to detect variations in \n\n"
-    "blood flow, providing real-time information about heart rate and \n\n"
-    "vascular health.\n\n"
-    "\n\n"
-    "The Butterworth low-pass filter is used to eliminate high-frequency noise \n\n"
-    "from PPG signals while preserving the desired low-frequency components. \n\n"
-    "With a smooth frequency response, it effectively attenuates frequencies \n\n"
-    "above a specified cutoff (e.g., 2.5 Hz), ensuring cleaner signal processing \n\n"
-    "for accurate heart rate detection."
-)
+# Sampling frequency and cutoff frequency for the filter
+fs = 50  # Hz
+cutoff = 2.5  # Hz
 
 # Function to draw the figure on the canvas
 def draw_figure(canvas, figure):
@@ -81,18 +69,7 @@ def create_plots():
 
     return (fig1, ax1), (fig2, ax2)
 
-# Function to draw the alarm LEDs
-def draw_alarm(canvas, state):
-    canvas.delete("all")
-    colors = {"high": "red", "normal": "green", "low": "blue"}
-    positions = {"high": (50, 50), "normal": (150, 50), "low": (250, 50)}
-    for key, pos in positions.items():
-        color = colors[key] if state == key else "grey"
-        canvas.create_oval(pos[0] - 20, pos[1] - 20, pos[0] + 20, pos[1] + 20, fill=color)
-        canvas.create_text(pos[0], pos[1] + 30, text=key.capitalize(), font=("Helvetica", 12))
-    canvas.create_text(150, 10, text="ALARMS", font=("Helvetica", 16))
-
-# Layout for the GUI
+# Create the GUI layout
 layout = [
     [sg.Text("Pulse Rate: "), sg.Text("0", key='-BPM-', font=("Helvetica", 50), size=(10, 1))],
     [sg.Canvas(key='-CANVAS-', size=(1200, 800)),
@@ -115,22 +92,16 @@ canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
 
 # Draw the initial alarm state
 alarm_canvas = window['-ALARM-'].TKCanvas
-draw_alarm(alarm_canvas, "normal")
-
 pulse_data = []
 filtered_pulse_data = []
 heart_rate_data = []
 time_data = []
 t = 0
-
-# Set update frequency to 1 second
 last_update_time = time.time()
 last_packet_time = time.time()
-last_log_time = time.time()  # Initialize the last log update time
-
-# Initialize heart_rate to None before the main loop
+last_log_time = time.time()
 heart_rate = None
-adp_threshold = None  # Initialize adp_threshold to None
+adp_threshold = None
 
 # Main loop
 while True:
@@ -139,65 +110,24 @@ while True:
     if event == sg.WIN_CLOSED or event == 'Exit':
         break
 
-    # Handle graph switching buttons
-    if event == 'PPG signal':
-        canvas.get_tk_widget().pack_forget()
-        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig1)
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display PPG signal")
-    elif event == 'Heart rate (bpm)':
-        canvas.get_tk_widget().pack_forget()
-        canvas = draw_figure(window['-CANVAS-'].TKCanvas, fig2)
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display heart rate (bpm)")
-    elif event == 'Info':
-        canvas.get_tk_widget().pack_forget()
-        window['-CANVAS-'].TKCanvas.create_rectangle(0, 0, window['-CANVAS-'].TKCanvas.winfo_width(), window['-CANVAS-'].TKCanvas.winfo_height(), fill="white")
-        window['-CANVAS-'].TKCanvas.create_text(
-            window['-CANVAS-'].TKCanvas.winfo_width() // 2,
-            window['-CANVAS-'].TKCanvas.winfo_height() // 2,
-            text=info_text,
-            fill="black",
-            font=("Helvetica", 20),
-            anchor='center',
-            justify='left'
-        )
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Display Info")
+    # Check and handle reconnection
+    ser = check_connection(ser, 'COM5', 115200)
 
-    # Update threshold values from input fields and handle empty input gracefully
-    try:
-        high_threshold = int(values['-HIGH-INPUT-']) if values['-HIGH-INPUT-'] else int(values['-HIGH-THRESH-'])
-        low_threshold = int(values['-LOW-INPUT-']) if values['-LOW-INPUT-'] else int(values['-LOW-THRESH-'])
-        window['-HIGH-THRESH-'].update(high_threshold)
-        window['-LOW-THRESH-'].update(low_threshold)
-    except ValueError:
-        pass
+    if ser.in_waiting > 0:
+        try:
+            line = ser.readline().decode('utf-8').strip()
+            last_packet_time = time.time()
 
-    # Attempt reconnection if the connection is lost
-    if ser and not ser.is_open:
-        window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Connection lost. Attempting to reconnect...")
-        ser.close()
-        start_reconnection('COM5', 115200)
-
-    # Read data from serial
-    if ser and ser.is_open and ser.in_waiting > 0:
-        line = ser.readline().decode('utf-8').strip()  # Read serial data
-        last_packet_time = time.time()  # Update last packet time
-
-        # Process the received line
-        if line:
-            try:
-                if line.startswith("R,"):  # Raw pulse data
+            if line:
+                if line.startswith("R,"):
                     pulse_values = [int(val.strip()) for val in line[2:].split(",")]
                     pulse_data.extend(pulse_values)
-
-                    # Apply low-pass filter
                     filtered_pulse_data = butter_lowpass_filter(pulse_data, cutoff, fs)
 
-                    # Keep the pulse data at a manageable size (last 250 samples)
                     if len(pulse_data) > 100:
                         pulse_data = pulse_data[-100:]
                         filtered_pulse_data = filtered_pulse_data[-100:]
 
-                    # Plot the pulse data
                     ax1.clear()
                     ax1.plot(pulse_data, label="Raw Pulse Data", alpha=0.5)
                     ax1.plot(filtered_pulse_data, label="Filtered Pulse Data", linestyle='--', color='blue')
@@ -206,27 +136,25 @@ while True:
                     ax1.legend()
                     canvas.draw()
 
-                elif line.startswith("H,"):  # Heart rate data
+                elif line.startswith("H,"):
                     heart_rate = float(line[2:])
-                    if heart_rate <= 120:  # Ignore readings above 120 BPM
+                    if heart_rate <= 120:
                         heart_rate_data.append(heart_rate)
                         window['-BPM-'].update(f"{heart_rate:.1f} BPM")
 
-                    # Manage x-axis sliding window for heart rate data
                     if len(time_data) > 10:
                         time_data = time_data[-10:]
                         heart_rate_data = heart_rate_data[-10:]
 
-                    # Plot heart rate data
                     ax2.clear()
                     ax2.plot(time_data, heart_rate_data, label="Heart Rate")
                     ax2.legend()
                     canvas.draw()
 
-                elif line.startswith("T,"):  # Adaptive threshold
+                elif line.startswith("T,"):
                     adp_threshold = int(line[2:])
 
-                elif line.startswith("S,"):  # Sequence number
+                elif line.startswith("S,"):
                     packet_sequence_number = int(line[2:])
                     if packet_sequence_number != last_sequence_number + 1:
                         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet out of order! Order: {packet_sequence_number}")
@@ -234,11 +162,9 @@ while True:
                         window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet received. Order: {packet_sequence_number}")
                     last_sequence_number = packet_sequence_number
 
-                # Update time data
                 t += 1
                 time_data.append(t)
 
-                # Log only once per second
                 current_time = time.time()
                 if current_time - last_log_time >= 0.8:
                     if heart_rate is not None:
@@ -256,19 +182,16 @@ while True:
                         window['-LOG-'].print(log_message)
                         last_log_time = current_time
 
-            except ValueError:
-                pass
+        except ValueError:
+            pass
 
-    # Check for packet loss (if 5 seconds have passed since the last packet)
     elif time.time() - last_packet_time > 5:
-        if time.time() - last_log_time > 1:  # Log only once per second
+        if time.time() - last_log_time > 1:
             window['-LOG-'].print(f"{datetime.now().strftime('%a %b %d %H:%M:%S %Y')}: Packet not received for 5 seconds!")
             last_log_time = time.time()
 
-    # Keep the GUI responsive
     window.refresh()
 
 # Close serial and GUI on exit
-if ser:
-    ser.close()
+ser.close()
 window.close()
